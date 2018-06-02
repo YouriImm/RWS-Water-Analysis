@@ -1,0 +1,93 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+### Bijlage 3 - tijdreeks chlorofyl A
+
+```{r setup, include=FALSE}
+#Libraries
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(plyr)
+library(dplyr)
+library(forecast)
+library(lubridate)
+library(zoo)
+library(ggplot2)
+library(tseries)
+```
+
+**Initialisatie**
+
+```{r include=FALSE}
+#Read file
+setwd('~')
+df <- read.csv('projectopdr-2/data/chlf_ts.csv')
+
+#Create TS
+df_ts <- ts(df[,2], start=c(2006,1), frequency = 12)
+```
+
+**Kwaliteitstoetsen**
+```{r}
+#Stationarity tests
+adf.test(df_ts)
+
+kpss.test(df_ts)
+
+```
+
+```{r}
+#STL decomposition
+df_stl <- stl(df_ts, s.window = 'periodic')
+plot(df_stl)
+```
+
+**Model**
+```{r}
+##Train/test split to assess model quality with.
+df_train <- stats::window(df_ts, 2006, c(2014, 12))
+df_test <- stats::window(df_ts, 2015)
+```
+
+```{r}
+#Model fit and diagnosis
+df_arima <- auto.arima(df_train)
+tsdiag(df_arima)
+```
+
+**Visualisatie**
+```{r}
+#Create forecast
+df_forecast <- forecast(df_arima, 24)
+
+#Plotting
+autoplot(df_forecast, alpha=0.5) + 
+  geom_line(aes(index(df_test), df_test), color='red', alpha=0.75)  + 
+  ggtitle("Tijdreeks en voorspellingen chlorofyl A") +
+  xlab("Jaartal") + ylab("Gem. hoeveelheid chlorofyl A") +
+  guides(fill = guide_legend(title = 'Confidence Interval', ncol = 2)) +
+  scale_x_continuous(labels = c(2007,2009,2011,2013,2015,2017), limits = c(2006,2017))
+ggsave('~/projectopdr-2/img/chlfa_timeseries_national_testset.png')
+```
+
+**Model accuracy**
+```{r}
+accuracy(df_forecast, df_test)
+```
+
+
+
+**Predictions**
+```{r}
+#Forecast
+df_forecast_far <- forecast(df_arima, 60)
+
+#Plotting
+autoplot(df_forecast_far, alpha=0.5) + 
+  ggtitle("Tijdreeks en voorspellingen chlorofyl A - tot 2020") +
+  xlab("Jaartal") + ylab("Gem. hoeveelheid chlorofyl A") +
+  guides(fill = guide_legend(title = 'Confidence Interval', ncol = 2))
+ggsave('~/projectopdr-2/img/chlfa_timeseries_national_future.png')
+```

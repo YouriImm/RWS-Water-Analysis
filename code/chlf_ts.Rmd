@@ -1,0 +1,108 @@
+---
+title: "Tijdreeks-analyse chlorofyl A"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(plyr)
+library(dplyr)
+library(forecast)
+library(lubridate)
+library(zoo)
+library(ggplot2)
+library(tseries)
+```
+
+```{r include=FALSE}
+setwd('~')
+df <- read.csv('projectopdr-2/data/chlf_ts.csv')
+
+#TS
+df_ts <- ts(df[,2], start=c(2006,1), frequency = 12)
+```
+### Kwaliteitstoetsen
+Om te beoordelen of de metingen van chlorofyl A in Nederland geschikt zijn om een tijdreeks te maken, zal hieronder een reeks toetsen uitgevoerd worden om de kwaliteit van de gegevens te beoordelen. Dit geeft vooraf een goede indicatie van hoe betrouwbaar een tijdreeks-model zou kunnen zijn.
+
+#### Stationairiteit
+
+```{r}
+adf.test(df_ts)
+
+kpss.test(df_ts)
+
+```
+
+Beide toetsen maken duidelijk dat aangenomen kan worden dat er sprake is van stationariteit in de tijdreeks. Dit impliceert dat de gemeten waarden relatief stabiel zijn, waardoor die zich lenen voor het maken van een model. Bij de ADF-test (P=0.01) wordt de nul-hypothese dat er geen stationairiteit is verworpen, en bij de KPSS-test (P=0.1) wordt de nul-hypothese dat er stationairiteit is aangenomen. 
+
+#### STL-Decomposition
+
+```{r}
+df_stl <- stl(df_ts, s.window = 'periodic')
+plot(df_stl)
+```
+In een STL-decomposition wordt de data opgedeeld in een seizoenscomponent, een algehele trend, en een overblijfsel. Deze drie grafieken bieden extra informatie over de beschikbare tijdreeks. 
+
+Dat er een sterke invloed van seizoenen op chlorofyl A is, is volkomen logisch. De grafiek die het seizoenscomponent toont maakt tevens duidelijk dat een tijdreeks-model gekozen zal moeten worden dat in staat is goed rekening te houden met het sterke effect ervan. De trend van de data is over het algemeen stabiel, maar vertoont na een lang dal wel een stijging. Enigszins zorgwekkend is hier dat fluctuaties in de data vrij sterk "doorschijnen" in de trend van de data. De remainder, het "overblijfsel" uit de data, oogt ongecorreleerd - een goed teken. Dit betekent immers dat aangenomen kan worden dat er geen waardevolle informatie in de data te vinden is die niet door het model zal worden opgevangen. 
+
+
+### Model
+Wegens het sterke seizoenscomponent van de tijdreeks is gekozen voor een ARIMA-model.
+
+```{r}
+##Train/test split to assess model quality with.
+df_train <- stats::window(df_ts, 2006, c(2014, 12))
+df_test <- stats::window(df_ts, 2015)
+```
+
+```{r}
+df_arima <- auto.arima(df_train)
+tsdiag(df_arima)
+```
+
+#### Kwaliteit
+Bovenstaande grafiek geeft een goede weergave van de kwaliteit van het zojuist gefitte model. De standardized residuals ogen rommelig en ongecorreleerd, en het gemiddelde ervan is 0 - een ideale situatie. De ACF (autocorrelatiefunctie) blijft keurig binnen de bandbreedte die aangegeven is. De Ljung-Box statistic, tenslotte, kent hoge p-waardes. Dit betekent dat aangenomen kan worden dat er geen onverklaarde relaties meer in de residuals van het model te vinden zijn.
+
+#### Grafiek
+```{r}
+df_forecast <- forecast(df_arima, 24)
+#plot(df_forecast)
+#lines(df_test, col=2)
+
+autoplot(df_forecast, alpha=0.5) + 
+  geom_line(aes(index(df_test), df_test), color='red', alpha=0.75)  + 
+  ggtitle("Tijdreeks en voorspellingen chlorofyl A") +
+  xlab("Jaartal") + ylab("Gem. hoeveelheid chlorofyl A") +
+  guides(fill = guide_legend(title = 'Confidence Interval', ncol = 2)) +
+  #theme(axis.text.x = as.integer(element_text()))
+  scale_x_continuous(labels = c(2007,2009,2011,2013,2015,2017), limits = c(2006,2017))
+ggsave('~/projectopdr-2/img/chlfa_timeseries_national_testset.png')
+```
+Hierboven wordt de tijdreeks getoond met daarbij de voorspellingen over de testperiode (2015 en 2016). In het rood is het daadwerkelijke verloop van de metingen te zien; in het blauw de door het model voorspelde waarden. Blauw geschaduwd zijn de "confidence intervals" van het model; dit betreft de foutmarge. Een confidence interval van 95 op een bepaald punt komt er immers op neer dat het model er 95% zeker van is dat de daadwerkelijke waarde in zich binnen deze bandbreedte bevindt. 
+
+Op het oog weet het model de trend van de data goed te vangen, maar is het model niet in staat tot het tonen van maandelijkse fluctuaties. 
+
+```{r}
+accuracy(df_forecast, df_test)
+```
+### Evaluatie
+Om de prestaties van het model te evalueren kijken we in dit geval naar de waardes van MAE en MASE op de testset. De absolute waardes van het model zijn te laag om gebruik te maken van de MAPE. 
+
+De MAE (mean absolute error) van het model is 1.73. De grafiek toont dat dit vooral schuilt in overschatting van een aantal pieken, en niet zozeer bij de dalen in de meetwaardes. Omdat 1.73 een relatief beperkte misser is ten opzichte van een waarde rond de 11 beschouwen wij dit als acceptabel, hoewel het absoluut niet perfect is. 
+
+De MASE (mean absolute scaled error) is teruggeschaald naar een waarde die voor alle ordes van grootte (van hoogte van meetwaarden) op dezelfde wijze te interpreteren is. Een MASE hoger dan 1 kan als problematisch worden gezien. Omdat de MASE rond de 0.79 ligt, is het model volgens deze evaluatietechniek acceptabel. 
+
+
+### Voorspellen
+```{r}
+df_forecast_far <- forecast(df_arima, 60)
+
+autoplot(df_forecast_far, alpha=0.5) + 
+  ggtitle("Tijdreeks en voorspellingen chlorofyl A - tot 2020") +
+  xlab("Jaartal") + ylab("Gem. hoeveelheid chlorofyl A") +
+  guides(fill = guide_legend(title = 'Confidence Interval', ncol = 2))
+ggsave('~/projectopdr-2/img/chlfa_timeseries_national_future.png')
+```
+Het model voorspelt, op basis van eerdere gegevens, dat de hoeveelheden chlorofyl A op jaarbasis min of meer gelijk zullen blijven. Wel is het van groot belang te noemen dat gezien de geringe periode waarop het model gebaseerd is het model een grote onzekerheidsmarge inbouwt, vooral in de verdere toekomst. 
+
